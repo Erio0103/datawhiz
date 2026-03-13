@@ -14,13 +14,15 @@ Everything is stored permanently in datalens.db:
 import os
 import io
 import json
+import pathlib
 import datetime
 from typing import Optional, List
 
 import pandas as pd
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -34,7 +36,7 @@ from backend.cleaner  import (
 load_dotenv()
 
 # ── App ───────────────────────────────────────────────────
-app = FastAPI(title="DataLens API", version="3.0")
+app = FastAPI(title="DataWhiz API", version="3.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -51,9 +53,11 @@ client = OpenAI(
 )
 
 # ── Storage folders ───────────────────────────────────────
-UPLOADS_DIR = "uploads"
-CLEANED_DIR = "cleaned"
-EXPORTS_DIR = "exports"
+UPLOADS_DIR  = "uploads"
+CLEANED_DIR  = "cleaned"
+EXPORTS_DIR  = "exports"
+FRONTEND_DIR = pathlib.Path(__file__).parent.parent / "frontend"
+
 for folder in [UPLOADS_DIR, CLEANED_DIR, EXPORTS_DIR]:
     os.makedirs(folder, exist_ok=True)
 
@@ -159,6 +163,15 @@ RULES:
 # ══════════════════════════════════════════════════════════
 # ENDPOINTS
 # ══════════════════════════════════════════════════════════
+
+# ── Root — serve frontend ─────────────────────────────────
+@app.get("/")
+def root():
+    """Serve the frontend index.html at the root URL."""
+    index = FRONTEND_DIR / "index.html"
+    if index.exists():
+        return HTMLResponse(content=index.read_text())
+    return {"message": "DataWhiz API is running! Visit /docs for API docs."}
 
 # ── Health check ──────────────────────────────────────────
 @app.get("/health")
@@ -575,8 +588,12 @@ def get_session():
     if not row:
         return {"message": "No session saved yet."}
     return {
-        "file_id":     row["file_id"],
-        "filename":    row["filename"],
-        "columns":     json.loads(row["columns"]),
-        "saved_at":    row["saved_at"],
+        "file_id":  row["file_id"],
+        "filename": row["filename"],
+        "columns":  json.loads(row["columns"]),
+        "saved_at": row["saved_at"],
     }
+
+# ── Mount frontend static files (must be LAST) ────────────
+if FRONTEND_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
