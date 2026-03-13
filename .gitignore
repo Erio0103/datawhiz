@@ -1,0 +1,6 @@
+".env" 
+"*.db" 
+"uploads/" 
+"cleaned/" 
+"exports/" 
+"__pycache__/" 
