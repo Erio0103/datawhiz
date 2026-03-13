@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>DataWhiz — AI Data Explorer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
+
+  <script>
+    tailwind.config = {
+      theme: { extend: {
+        fontFamily: { display: ['Bebas Neue','sans-serif'], body: ['DM Sans','sans-serif'] },
+        colors: {
+          bg:      '#0A0A0F',
+          surface: '#13131A',
+          card:    '#1C1C26',
+          border:  '#2A2A38',
+          accent:  '#00E5A0',
+          accentD: '#00B87D',
+          dim:     '#6B6B80',
+          light:   '#E8E8F0',
+        }
+      }}
+    };
+  </script>
+
+  <style>
+    *,*::before,*::after{box-sizing:border-box;}
+    body{font-family:'DM Sans',sans-serif;background:#0A0A0F;color:#E8E8F0;min-height:100vh;}
+    ::-webkit-scrollbar{width:4px;}
+    ::-webkit-scrollbar-track{background:transparent;}
+    ::-webkit-scrollbar-thumb{background:#2A2A38;border-radius:2px;}
+
+    /* Grain overlay */
+    body::after{content:'';position:fixed;inset:0;
+      background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+      pointer-events:none;z-index:0;}
+
+    /* Glow accent line at top */
+    .top-glow{position:fixed;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,#00E5A0,transparent);z-index:100;}
+
+    /* Chat messages */
+    .msg-user{background:#1C2E28;border:1px solid #1F4A38;border-radius:16px 16px 4px 16px;}
+    .msg-bot {background:#1C1C26;border:1px solid #2A2A38;border-radius:16px 16px 16px 4px;}
+
+    /* Drop zone */
+    #drop-zone.drag-over{border-color:#00E5A0 !important;background:#0D1F18 !important;}
+
+    /* Typing dots */
+    .dot{width:6px;height:6px;background:#00E5A0;border-radius:50%;animation:pulse 1.2s infinite;}
+    .dot:nth-child(2){animation-delay:.2s;}
+    .dot:nth-child(3){animation-delay:.4s;}
+    @keyframes pulse{0%,80%,100%{opacity:.2;transform:scale(.8)}40%{opacity:1;transform:scale(1)}}
+
+    /* Tab active */
+    .tab-active{color:#00E5A0;border-bottom:2px solid #00E5A0;}
+    .tab-inactive{color:#6B6B80;border-bottom:2px solid transparent;}
+
+    /* Stat pill */
+    .stat{background:#13131A;border:1px solid #2A2A38;border-radius:6px;padding:4px 10px;font-size:11px;color:#6B6B80;}
+
+    /* Pill suggestion */
+    .pill{border:1px solid #2A2A38;background:#13131A;border-radius:999px;padding:5px 12px;font-size:12px;
+          color:#6B6B80;cursor:pointer;transition:all .15s;white-space:nowrap;}
+    .pill:hover{border-color:#00E5A0;color:#00E5A0;background:#0D1F18;}
+
+    /* Anomaly badge */
+    .anomaly-badge{background:#1F1510;border:1px solid #4A2510;border-radius:8px;padding:10px 14px;}
+
+    /* File history item */
+    .file-item{background:#13131A;border:1px solid #2A2A38;border-radius:10px;padding:12px;
+               cursor:pointer;transition:all .15s;}
+    .file-item:hover{border-color:#00E5A0;background:#0D1F18;}
+
+    /* Send button */
+    #send-btn{transition:transform .15s,background .15s;}
+    #send-btn:hover{transform:scale(1.05);}
+    #send-btn:active{transform:scale(.97);}
+
+    /* Fade in */
+    @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+    .fade-up{animation:fadeUp .3s ease forwards;}
+
+    /* Chart section */
+    #chart-section{transition:opacity .3s,transform .3s;}
+  </style>
+</head>
+<body class="relative z-10">
+<div class="top-glow"></div>
+
+<!-- ══════════════════════════════════════════════
+     HEADER
+═══════════════════════════════════════════════ -->
+<header class="sticky top-0 z-50 border-b border-border bg-bg/80 backdrop-blur-md">
+  <div class="max-w-screen-xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 bg-accent rounded-lg flex items-center justify-center">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+          <rect x="1" y="9" width="3" height="6" rx="1" fill="#0A0A0F"/>
+          <rect x="6" y="5" width="3" height="10" rx="1" fill="#0A0A0F"/>
+          <rect x="11" y="1" width="3" height="14" rx="1" fill="#0A0A0F"/>
+        </svg>
+      </div>
+      <span class="font-display text-2xl tracking-wider text-light">DATA<span class="text-accent">WHIZ</span></span>
+    </div>
+    <div id="dataset-badge" class="hidden items-center gap-2">
+      <span class="stat" id="badge-filename"></span>
+      <span class="stat" id="badge-rows"></span>
+      <span class="stat text-accent border-accent/30" id="badge-cols"></span>
+    </div>
+    <div class="flex items-center gap-3">
+      <div class="flex items-center gap-2 text-xs text-dim">
+        <div class="w-2 h-2 rounded-full bg-accent animate-pulse"></div>
+        AI Powered
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- ══════════════════════════════════════════════
+     MAIN LAYOUT
+═══════════════════════════════════════════════ -->
+<main class="max-w-screen-xl mx-auto px-6 py-6 grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-6 min-h-[calc(100vh-57px)]">
+
+  <!-- ── LEFT PANEL ─────────────────────────── -->
+  <aside class="flex flex-col gap-4">
+
+    <!-- Upload card -->
+    <div class="bg-card border border-border rounded-2xl p-5">
+      <p class="text-xs font-500 uppercase tracking-widest text-accent mb-3">Upload CSV</p>
+      <div id="drop-zone"
+           class="border-2 border-dashed border-border rounded-xl p-5 text-center cursor-pointer hover:border-accent hover:bg-surface transition-all"
+           onclick="document.getElementById('csv-input').click()"
+           ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)">
+        <div class="w-10 h-10 bg-surface rounded-full flex items-center justify-center mx-auto mb-2">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#00E5A0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+        </div>
+        <p class="text-sm font-500 text-light mb-1">Drop CSV here</p>
+        <p class="text-xs text-dim">or click to browse</p>
+        <input type="file" id="csv-input" accept=".csv" class="hidden" onchange="uploadFile(this.files[0])"/>
+      </div>
+
+      <!-- Upload status -->
+      <div id="upload-status" class="hidden mt-3 p-3 rounded-lg bg-surface border border-accent/20">
+        <div class="flex items-center gap-2">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#00E5A0" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+          <div>
+            <p id="status-filename" class="text-xs font-500 text-light"></p>
+            <p id="status-meta" class="text-xs text-dim"></p>
+          </div>
+        </div>
+        <!-- Cleaning log -->
+        <div id="cleaning-log" class="mt-2 hidden">
+          <p class="text-xs text-accent mb-1">Cleaning applied:</p>
+          <ul id="cleaning-list" class="text-xs text-dim space-y-0.5 list-disc list-inside"></ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tabs: Schema / Files / Anomalies / History -->
+    <div class="bg-card border border-border rounded-2xl overflow-hidden">
+      <div class="flex border-b border-border">
+        <button class="tab-active flex-1 py-2.5 text-xs font-500 transition-all" onclick="switchTab('schema',this)">Schema</button>
+        <button class="tab-inactive flex-1 py-2.5 text-xs font-500 transition-all" onclick="switchTab('files',this)">Files</button>
+        <button class="tab-inactive flex-1 py-2.5 text-xs font-500 transition-all" onclick="switchTab('anomalies',this)">Anomalies</button>
+        <button class="tab-inactive flex-1 py-2.5 text-xs font-500 transition-all" onclick="switchTab('history',this)">History</button>
+      </div>
+
+      <!-- Schema tab -->
+      <div id="tab-schema" class="p-4">
+        <div id="schema-empty" class="text-center py-6">
+          <p class="text-xs text-dim">Upload a CSV to see columns</p>
+        </div>
+        <ul id="schema-list" class="space-y-2 hidden"></ul>
+      </div>
+
+      <!-- Files tab -->
+      <div id="tab-files" class="p-4 hidden">
+        <div class="flex items-center justify-between mb-3">
+          <p class="text-xs text-dim">All uploaded files</p>
+          <button onclick="loadAllFiles()" class="text-xs text-accent hover:underline">Refresh</button>
+        </div>
+        <div id="files-list" class="space-y-2">
+          <p class="text-xs text-dim text-center py-4">Loading...</p>
+        </div>
+      </div>
+
+      <!-- Anomalies tab -->
+      <div id="tab-anomalies" class="p-4 hidden">
+        <div id="anomalies-empty" class="text-center py-6">
+          <p class="text-xs text-dim">Upload a CSV to detect anomalies</p>
+        </div>
+        <div id="anomalies-list" class="space-y-2 hidden"></div>
+      </div>
+
+      <!-- History tab -->
+      <div id="tab-history" class="p-4 hidden">
+        <div class="flex items-center justify-between mb-3">
+          <p class="text-xs text-dim">Previous Q&As</p>
+          <button onclick="exportHistory()" class="text-xs text-accent hover:underline">Export</button>
+        </div>
+        <div id="history-list" class="space-y-2">
+          <p class="text-xs text-dim text-center py-4">No history yet</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Suggestions -->
+    <div id="suggestions-card" class="bg-card border border-border rounded-2xl p-4 hidden">
+      <p class="text-xs font-500 uppercase tracking-widest text-accent mb-3">Try asking</p>
+      <div id="suggestions-list" class="flex flex-wrap gap-2"></div>
+    </div>
+
+  </aside>
+
+  <!-- ── RIGHT PANEL ────────────────────────── -->
+  <section class="flex flex-col gap-4 min-h-0">
+
+    <!-- Chart section -->
+    <div id="chart-section" class="hidden bg-card border border-border rounded-2xl p-5">
+      <div class="flex items-center justify-between mb-4">
+        <p id="chart-title" class="font-display text-lg tracking-wide text-light"></p>
+        <div class="flex gap-2">
+          <span id="chart-type-badge" class="stat text-accent border-accent/30"></span>
+          <button onclick="downloadChart()" title="Download PNG"
+                  class="w-7 h-7 rounded-lg border border-border flex items-center justify-center hover:border-accent hover:text-accent transition-all text-dim">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div style="height:260px;position:relative;">
+        <canvas id="chart-canvas"></canvas>
+      </div>
+    </div>
+
+    <!-- Chat window -->
+    <div class="flex-1 flex flex-col bg-card border border-border rounded-2xl overflow-hidden" style="min-height:420px;">
+      <div class="px-5 py-3 border-b border-border flex items-center gap-2">
+        <div class="w-2 h-2 rounded-full bg-accent"></div>
+        <p class="text-sm font-500 text-light">Chat</p>
+        <span class="ml-auto text-xs text-dim">llama-3.3-70b · Groq</span>
+      </div>
+
+      <!-- Messages -->
+      <div id="chat-messages" class="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+        <div class="msg-bot px-4 py-3 max-w-[85%] fade-up">
+          <p class="text-sm leading-relaxed text-light">
+            👋 Welcome to <strong class="text-accent">DataWhiz</strong>! Upload a CSV and ask me anything — summaries, rankings, trends, or charts.
+          </p>
+        </div>
+      </div>
+
+      <!-- Input -->
+      <div class="border-t border-border p-4">
+        <div class="flex gap-3 items-end">
+          <textarea id="prompt-input" rows="2"
+            placeholder="Ask anything about your data…"
+            class="flex-1 resize-none rounded-xl border border-border bg-surface px-4 py-3 text-sm focus:outline-none focus:border-accent transition-colors text-light placeholder-dim"
+            onkeydown="handleKeyDown(event)"></textarea>
+          <button id="send-btn" onclick="sendQuery()"
+            class="bg-accent text-bg rounded-xl px-5 py-3 text-sm font-500 flex items-center gap-2 shrink-0 hover:bg-accentD">
+            <span>Ask</span>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+            </svg>
+          </button>
+        </div>
+        <p class="text-xs text-dim mt-2 ml-1">
+          <kbd class="bg-surface border border-border rounded px-1">Ctrl+Enter</kbd> to send
+        </p>
+      </div>
+    </div>
+
+  </section>
+</main>
+
+
+<!-- ══════════════════════════════════════════════
+     JAVASCRIPT
+═══════════════════════════════════════════════ -->
+<script>
+const API = 'http://localhost:8000';
+const PALETTE = ['#00E5A0','#3B82F6','#F59E0B','#EF4444','#8B5CF6','#EC4899','#06B6D4','#84CC16'];
+let chartInstance = null;
+let currentFileId = null;
+
+// ── Drag & drop ─────────────────────────────────────────
+function handleDragOver(e){e.preventDefault();document.getElementById('drop-zone').classList.add('drag-over');}
+function handleDragLeave(){document.getElementById('drop-zone').classList.remove('drag-over');}
+function handleDrop(e){e.preventDefault();handleDragLeave();const f=e.dataTransfer.files[0];if(f)uploadFile(f);}
+
+// ── Upload CSV ──────────────────────────────────────────
+async function uploadFile(file){
+  if(!file||!file.name.endsWith('.csv')){showToast('Please upload a .csv file','error');return;}
+  const fd=new FormData();fd.append('file',file);
+  showToast('Uploading and cleaning...','info');
+  try{
+    const res=await fetch(`${API}/upload`,{method:'POST',body:fd});
+    const data=await res.json();
+    if(!res.ok){showToast(data.detail||'Upload failed','error');return;}
+    currentFileId=data.file_id;
+
+    // Header badges
+    document.getElementById('badge-filename').textContent=data.filename;
+    document.getElementById('badge-rows').textContent=`${data.cleaned_rows} rows`;
+    document.getElementById('badge-cols').textContent=`${data.columns.length} cols`;
+    document.getElementById('dataset-badge').classList.remove('hidden');
+    document.getElementById('dataset-badge').classList.add('flex');
+
+    // Upload status
+    document.getElementById('status-filename').textContent=`✓ ${data.filename}`;
+    document.getElementById('status-meta').textContent=`${data.original_rows} → ${data.cleaned_rows} rows · ${data.columns.length} columns`;
+    document.getElementById('upload-status').classList.remove('hidden');
+
+    // Cleaning log
+    if(data.cleaning_log&&data.cleaning_log.length>0){
+      const list=document.getElementById('cleaning-list');
+      list.innerHTML=data.cleaning_log.map(l=>`<li>${l}</li>`).join('');
+      document.getElementById('cleaning-log').classList.remove('hidden');
+    }
+
+    // Schema tab
+    buildSchema(data.columns);
+
+    // Suggestions
+    buildSuggestions(data.columns);
+    document.getElementById('suggestions-card').classList.remove('hidden');
+
+    // Load anomalies
+    loadAnomalies();
+    loadHistory();
+    loadAllFiles();
+
+    // Chat message
+    appendBot(`📂 <strong class="text-accent">${data.filename}</strong> loaded — ${data.cleaned_rows} rows, ${data.columns.length} columns. ${data.anomalies_found>0?`⚠️ ${data.anomalies_found} anomalies detected.`:''} What would you like to explore?`);
+    showToast('CSV uploaded and saved to SQLite ✓','success');
+  }catch(err){
+    showToast('Cannot connect to backend. Is the server running?','error');
+  }
+}
+
+function buildSchema(cols){
+  const list=document.getElementById('schema-list');
+  list.innerHTML=cols.map(c=>`
+    <li class="flex items-center gap-2 text-sm">
+      <span class="w-1.5 h-1.5 rounded-full bg-accent shrink-0"></span>
+      <span class="text-light">${c}</span>
+    </li>`).join('');
+  document.getElementById('schema-empty').classList.add('hidden');
+  list.classList.remove('hidden');
+}
+
+function buildSuggestions(cols){
+  const lower=cols.map(c=>c.toLowerCase());
+  const pills=[];
+  if(lower.some(c=>c.includes('region')||c.includes('country')))pills.push('Sales by region as pie chart');
+  if(lower.some(c=>c.includes('category')||c.includes('type')))pills.push('Bar chart of sales by category');
+  if(lower.some(c=>c.includes('date')||c.includes('time')))pills.push('Sales trend over time');
+  if(lower.some(c=>c.includes('profit')||c.includes('revenue')))pills.push('What is the total profit?');
+  if(lower.some(c=>c.includes('product')||c.includes('item')))pills.push('Top 5 products by sales');
+  if(pills.length===0)pills.push('Summarize the dataset','Show a bar chart','Top 5 rows by value');
+
+  const container=document.getElementById('suggestions-list');
+  container.innerHTML=pills.slice(0,5).map(t=>`
+    <button class="pill" onclick="setPrompt('${t}')">${t}</button>`).join('');
+}
+
+function setPrompt(text){
+  document.getElementById('prompt-input').value=text;
+  sendQuery();
+}
+
+// ── Send query ──────────────────────────────────────────
+async function sendQuery(){
+  const input=document.getElementById('prompt-input');
+  const prompt=input.value.trim();
+  if(!prompt)return;
+  input.value='';
+  appendUser(prompt);
+  const tid=appendTyping();
+  try{
+    const res=await fetch(`${API}/query`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({prompt}),
+    });
+    const data=await res.json();
+    removeTyping(tid);
+    appendBot(data.answer.replace(/\n/g,'<br>'));
+    if(data.chart)renderChart(data.chart);
+    if(data.chart_suggestion&&!data.chart)
+      appendBot(`💡 <span class="text-dim">Suggested chart: ${data.chart_suggestion} chart (ask for a chart to see it)</span>`);
+    loadHistory();
+  }catch(err){
+    removeTyping(tid);
+    appendBot('❌ Could not reach the backend. Make sure the server is running on port 8000.');
+  }
+}
+
+function handleKeyDown(e){if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){e.preventDefault();sendQuery();}}
+
+// ── Chat helpers ────────────────────────────────────────
+function appendUser(text){
+  const c=document.getElementById('chat-messages');
+  const d=document.createElement('div');
+  d.className='flex justify-end fade-up';
+  d.innerHTML=`<div class="msg-user px-4 py-3 max-w-[80%]"><p class="text-sm leading-relaxed">${escHtml(text)}</p></div>`;
+  c.appendChild(d);scrollBot();
+}
+function appendBot(html){
+  const c=document.getElementById('chat-messages');
+  const d=document.createElement('div');
+  d.className='msg-bot px-4 py-3 max-w-[85%] fade-up';
+  d.innerHTML=`<p class="text-sm leading-relaxed text-light">${html}</p>`;
+  c.appendChild(d);scrollBot();
+}
+function appendTyping(){
+  const c=document.getElementById('chat-messages');
+  const id='typing-'+Date.now();
+  const d=document.createElement('div');
+  d.id=id;d.className='msg-bot px-4 py-3 max-w-[85%]';
+  d.innerHTML='<div class="flex gap-1.5 items-center"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>';
+  c.appendChild(d);scrollBot();return id;
+}
+function removeTyping(id){const el=document.getElementById(id);if(el)el.remove();}
+function scrollBot(){const c=document.getElementById('chat-messages');c.scrollTop=c.scrollHeight;}
+function escHtml(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+// ── Chart rendering ─────────────────────────────────────
+function renderChart(chart){
+  const section=document.getElementById('chart-section');
+  section.classList.remove('hidden');
+  document.getElementById('chart-title').textContent=chart.title||'Chart';
+  document.getElementById('chart-type-badge').textContent=chart.type||'bar';
+  if(chartInstance){chartInstance.destroy();chartInstance=null;}
+  const type=chart.type||'bar';
+  const datasets=chart.datasets.map((ds,i)=>{
+    const base={label:ds.label,data:ds.data};
+    if(type==='pie'){
+      base.backgroundColor=chart.labels.map((_,j)=>PALETTE[j%PALETTE.length]);
+      base.borderColor='#1C1C26';base.borderWidth=2;
+    }else{
+      base.backgroundColor=PALETTE[i%PALETTE.length]+'33';
+      base.borderColor=PALETTE[i%PALETTE.length];
+      base.borderWidth=2;base.borderRadius=6;base.tension=.4;
+      if(type==='line'){base.fill=true;base.pointBackgroundColor=PALETTE[i%PALETTE.length];base.pointRadius=4;}
+    }
+    return base;
+  });
+  chartInstance=new Chart(document.getElementById('chart-canvas'),{
+    type,data:{labels:chart.labels,datasets},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{
+        legend:{display:datasets.length>1||type==='pie',position:'bottom',
+          labels:{color:'#E8E8F0',font:{family:'DM Sans',size:11},padding:14,usePointStyle:true}},
+        tooltip:{backgroundColor:'#1C1C26',borderColor:'#2A2A38',borderWidth:1,
+          titleColor:'#E8E8F0',bodyColor:'#E8E8F0',padding:10,cornerRadius:8},
+      },
+      scales:type==='pie'?{}:{
+        x:{grid:{color:'#1C1C26'},ticks:{color:'#6B6B80',font:{family:'DM Sans',size:11}}},
+        y:{grid:{color:'#1C1C26'},ticks:{color:'#6B6B80',font:{family:'DM Sans',size:11}},beginAtZero:true},
+      },
+    },
+  });
+}
+
+function downloadChart(){
+  if(!chartInstance)return;
+  const a=document.createElement('a');
+  a.href=document.getElementById('chart-canvas').toDataURL('image/png');
+  a.download='datawhiz-chart.png';a.click();
+}
+
+// ── Tabs ────────────────────────────────────────────────
+function switchTab(name,btn){
+  ['schema','files','anomalies','history'].forEach(t=>{
+    document.getElementById(`tab-${t}`).classList.add('hidden');
+  });
+  document.querySelectorAll('[onclick^="switchTab"]').forEach(b=>{
+    b.className='tab-inactive flex-1 py-2.5 text-xs font-500 transition-all';
+  });
+  document.getElementById(`tab-${name}`).classList.remove('hidden');
+  btn.className='tab-active flex-1 py-2.5 text-xs font-500 transition-all';
+  if(name==='files')loadAllFiles();
+  if(name==='history')loadHistory();
+}
+
+// ── Load all uploaded files ─────────────────────────────
+async function loadAllFiles(){
+  try{
+    const res=await fetch(`${API}/files`);
+    const data=await res.json();
+    const container=document.getElementById('files-list');
+    if(!data.files.length){
+      container.innerHTML='<p class="text-xs text-dim text-center py-4">No files uploaded yet</p>';return;
+    }
+    container.innerHTML=data.files.map(f=>`
+      <div class="file-item" onclick="loadFile(${f.id})">
+        <div class="flex items-center justify-between">
+          <p class="text-xs font-500 text-light truncate">${f.filename}</p>
+          <span class="text-xs text-dim ml-2 shrink-0">#${f.id}</span>
+        </div>
+        <p class="text-xs text-dim mt-0.5">${f.cleaned_rows} rows · ${f.columns.length} cols</p>
+        <p class="text-xs text-dim">${f.uploaded_at.slice(0,16)}</p>
+      </div>`).join('');
+  }catch(e){}
+}
+
+async function loadFile(id){
+  try{
+    const res=await fetch(`${API}/files/load/${id}`,{method:'POST'});
+    const data=await res.json();
+    if(!res.ok){showToast(data.detail,'error');return;}
+    currentFileId=id;
+    document.getElementById('badge-filename').textContent=data.filename;
+    document.getElementById('badge-rows').textContent=`${data.rows} rows`;
+    document.getElementById('badge-cols').textContent=`${data.columns.length} cols`;
+    document.getElementById('dataset-badge').classList.remove('hidden');
+    document.getElementById('dataset-badge').classList.add('flex');
+    buildSchema(data.columns);
+    buildSuggestions(data.columns);
+    document.getElementById('suggestions-card').classList.remove('hidden');
+    appendBot(`🔄 Switched to <strong class="text-accent">${data.filename}</strong> (${data.rows} rows). Ask away!`);
+    showToast(`Loaded '${data.filename}'`,'success');
+    loadAnomalies();
+    loadHistory();
+  }catch(e){showToast('Failed to load file','error');}
+}
+
+// ── Load anomalies ──────────────────────────────────────
+async function loadAnomalies(){
+  try{
+    const res=await fetch(`${API}/anomalies`);
+    const data=await res.json();
+    const container=document.getElementById('anomalies-list');
+    document.getElementById('anomalies-empty').classList.add('hidden');
+    container.classList.remove('hidden');
+    if(!data.anomalies.length){
+      container.innerHTML='<p class="text-xs text-accent text-center py-4">✅ No anomalies found!</p>';return;
+    }
+    container.innerHTML=data.anomalies.map(a=>`
+      <div class="anomaly-badge">
+        <p class="text-xs font-500 text-amber-400">⚠️ ${a.column} — ${a.count} outlier(s)</p>
+        <p class="text-xs text-dim mt-1">Normal range: ${a.normal_range.min} – ${a.normal_range.max}</p>
+        <p class="text-xs text-dim">Values: ${a.outlier_values.slice(0,5).join(', ')}</p>
+      </div>`).join('');
+  }catch(e){}
+}
+
+// ── Load chat history ───────────────────────────────────
+async function loadHistory(){
+  try{
+    const res=await fetch(`${API}/history?limit=20`);
+    const data=await res.json();
+    const container=document.getElementById('history-list');
+    if(!data.chats.length){
+      container.innerHTML='<p class="text-xs text-dim text-center py-4">No history yet</p>';return;
+    }
+    container.innerHTML=data.chats.map(c=>`
+      <div class="bg-surface border border-border rounded-lg p-3 cursor-pointer hover:border-accent transition-all"
+           onclick="document.getElementById('prompt-input').value='${c.question.replace(/'/g,"\\'")}'" >
+        <p class="text-xs font-500 text-light truncate">❓ ${c.question}</p>
+        <p class="text-xs text-dim mt-1 truncate">💬 ${c.answer.slice(0,80)}...</p>
+        <p class="text-xs text-dim mt-1">${c.asked_at.slice(0,16)}</p>
+      </div>`).join('');
+  }catch(e){}
+}
+
+async function exportHistory(){
+  window.open(`${API}/history/export`,'_blank');
+}
+
+// ── Toast ───────────────────────────────────────────────
+function showToast(msg,type='info'){
+  const t=document.createElement('div');
+  const colors={success:'bg-accent text-bg',error:'bg-red-500 text-white',info:'bg-surface border border-border text-light'};
+  t.className=`fixed bottom-6 right-6 z-50 px-4 py-3 rounded-xl shadow-xl text-sm font-500 transition-all duration-300 ${colors[type]||colors.info}`;
+  t.textContent=msg;
+  document.body.appendChild(t);
+  setTimeout(()=>{t.style.opacity='0';setTimeout(()=>t.remove(),300);},3000);
+}
+
+// ── Init ─────────────────────────────────────────────────
+loadAllFiles();
+loadHistory();
+</script>
+</body>
+</html>
