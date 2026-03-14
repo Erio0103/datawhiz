@@ -288,7 +288,7 @@
      JAVASCRIPT
 ═══════════════════════════════════════════════ -->
 <script>
-const API = 'http://localhost:8000';
+const API = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') ? 'http://localhost:8000' : 'https://datawhiz-1.onrender.com';
 const PALETTE = ['#00E5A0','#3B82F6','#F59E0B','#EF4444','#8B5CF6','#EC4899','#06B6D4','#84CC16'];
 let chartInstance = null;
 let currentFileId = null;
